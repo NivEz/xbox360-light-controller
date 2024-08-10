@@ -1,8 +1,8 @@
+import pygame
 import broadlink.exceptions
 from time import sleep
 
 from bulb import initialize_connection
-import pygame
 import xbox360_controller as my_controller
 
 
@@ -43,6 +43,17 @@ class LightController:
             if event.button == my_controller.START:
                 bulb_pwr = self.bulb.get_state()['pwr']
                 self.bulb.set_state(pwr=int(not bulb_pwr))
+            if event.button == my_controller.A:
+                self.bulb.set_state(red=0, green=100, blue=0)
+            if event.button == my_controller.B:
+                self.bulb.set_state(red=100, green=0, blue=0)
+            if event.button == my_controller.X:
+                self.bulb.set_state(red=0, green=0, blue=100)
+            if event.button == my_controller.Y:
+                self.bulb.set_state(red=255, green=140, blue=0)
+            if event.button == my_controller.BACK:
+                bulb_color_mode = self.bulb.get_state()['bulb_colormode']
+                self.bulb.set_state(bulb_colormode=int(not bulb_color_mode), brightness=50)
 
     def connect_to_bulb(self):
         max_retries = self.max_bulb_connection_retries
