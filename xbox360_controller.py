@@ -100,9 +100,7 @@ elif platform_id == MAC:
 
 
 class Controller:
-    id_num = 0
-
-    def __init__(self, dead_zone=0.15):
+    def __init__(self, device_id, dead_zone=0.15):
         """
         Initializes a controller. IDs for controllers begin at 0 and increment by 1
         each time a controller is initialized.
@@ -110,16 +108,13 @@ class Controller:
         Args:
             dead_zone: The size of dead zone for the analog sticks (default 0.15)
         """
-
-        self.joystick = pygame.joystick.Joystick(Controller.id_num)
+        self.joystick = pygame.joystick.Joystick(device_id)
         self.joystick.init()
         self.dead_zone = dead_zone
 
         # Linux and Mac triggers behave funny. See get_triggers().
         self.left_trigger_used = False
         self.right_trigger_used = False
-
-        Controller.id_num += 1
 
     def get_id(self):
         """
