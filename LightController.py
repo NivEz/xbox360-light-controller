@@ -1,7 +1,7 @@
 import pygame
 import broadlink.exceptions
 from time import time, sleep
-import math
+import asyncio
 
 import xbox360_controller
 from bulb import initialize_connection
@@ -10,8 +10,6 @@ from bulb import initialize_connection
 class LightController:
     max_bulb_connection_retries = 3
     bulb_retry_timeout = 10
-    my_controller = None
-    last_timestamp = time()
 
     def __init__(self, bulb_ip, ssid, wifi_pass):
         self.bulb_ip = bulb_ip
@@ -20,12 +18,17 @@ class LightController:
         self.bulb = None
         self.is_bulb_connected = False
         self.connect_to_bulb()
+        self.my_controller = None
+        self.last_timestamp = time()
+        self.currently_held_button = None
+        self.wheel_color_loop = None
+        self.additive_y = None
 
-    def start(self):
+    async def start(self):
         pygame.init()
 
         while self.is_bulb_connected:
-            sleep(0.1)
+            await asyncio.sleep(0.1)
             for event in pygame.event.get():
                 if event.type == pygame.JOYDEVICEADDED:
                     self.my_controller = xbox360_controller.Controller(device_id=event.device_index)
@@ -34,17 +37,21 @@ class LightController:
                     print("Joystick disconnected")
                 else:
                     try:
-                        self.handle_joystick_controls(event)
+                        await self.handle_joystick_controls(event)
                     except broadlink.exceptions.NetworkTimeoutError:
                         print("---------------")
                         print("Bulb connection error, using retry mechanism...")
                         self.connect_to_bulb()
 
-    def handle_joystick_controls(self, event):
+    async def handle_joystick_controls(self, event):
         if event.type == pygame.JOYBUTTONUP:
+            self.currently_held_button = None
+            self.wheel_color_loop.cancel()
+            bulb_pwr = self.bulb.get_state()['pwr']
             if event.button == xbox360_controller.START:
-                bulb_pwr = self.bulb.get_state()['pwr']
                 self.bulb.set_state(pwr=int(not bulb_pwr))
+            if not bulb_pwr:
+                return
             if event.button == xbox360_controller.BACK:
                 bulb_color_mode = self.bulb.get_state()['bulb_colormode']
                 self.bulb.set_state(bulb_colormode=int(not bulb_color_mode), brightness=50)
@@ -56,21 +63,47 @@ class LightController:
                 self.bulb.set_state(red=0, green=0, blue=100)
             if event.button == xbox360_controller.Y:
                 self.bulb.set_state(red=255, green=140, blue=0)
+        elif event.type == pygame.JOYBUTTONDOWN:
+            if event.button in [xbox360_controller.B, xbox360_controller.A, xbox360_controller.X]:
+                self.currently_held_button = event.button
+                self.wheel_color_loop = asyncio.create_task(self.create_wheel_color_loop())
         elif event.type == pygame.JOYAXISMOTION:
             now = time()
             # sort of throttling to prevent from the bulb to be flooded
-            if (now - self.last_timestamp) < 0.25:
+            if (now - self.last_timestamp) < 0.05:
                 return
             left_x, left_y = self.my_controller.get_left_stick()
-            red = (left_x + 1) * 127.5
-            green = (left_y + 1) * 127.5
-            # the distance between the center of the joystick to the current point will be the blue
-            blue = math.sqrt((left_x ** 2) + (left_y ** 2)) * 255
-            if blue > 255:
-                blue = 255
-            self.bulb.set_state(red=red, green=green, blue=blue)
+            y = (-1 * left_y) * 10
+            self.additive_y = y
             self.last_timestamp = now
-            print(red, green, blue)
+
+    async def create_wheel_color_loop(self):
+        while True:
+            await asyncio.sleep(0.1)
+            bulb_state = self.bulb.get_state()
+            if self.currently_held_button == xbox360_controller.B:
+                red = int(bulb_state['red'] + self.additive_y)
+                if red > 255:
+                    red = 255
+                if red < 1:
+                    red = 1
+                self.bulb.set_state(red=red)
+            if self.currently_held_button == xbox360_controller.A:
+                green = int(bulb_state['green'] + self.additive_y)
+                if green > 255:
+                    green = 255
+                if green < 1:
+                    green = 1
+                self.bulb.set_state(green=green)
+            if self.currently_held_button == xbox360_controller.X:
+                blue = int(bulb_state['blue'] + self.additive_y)
+                if blue > 255:
+                    blue = 255
+                if blue < 1:
+                    blue = 1
+                self.bulb.set_state(blue=blue)
+            state = {k: bulb_state.get(k) for k in ["red", "green", "blue"]}
+            print(state)
 
     def connect_to_bulb(self):
         max_retries = self.max_bulb_connection_retries
