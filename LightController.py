@@ -25,6 +25,7 @@ class LightController:
         self.wheel_color_loop = None
         self.is_wheel_color_mode = False
         self.additive_y = 0
+        self.is_brightness_loop_running = False
 
     async def start(self):
         pygame.init()
@@ -72,27 +73,38 @@ class LightController:
                     self.bulb.set_state(red=0, green=0, blue=100)
                 case xbox360_controller.Y:
                     self.bulb.set_state(red=255, green=140, blue=0)
+                case xbox360_controller.LEFT_BUMP:
+                    bulb_state = self.bulb.get_state()
+                    state = [f"{k}: {bulb_state.get(k)}" for k in ["red", "green", "blue", "brightness"]]
+                    print(state)
         elif event.type == pygame.JOYBUTTONDOWN:
             if event.button in [xbox360_controller.B, xbox360_controller.A, xbox360_controller.X]:
                 self.currently_held_button = event.button
                 self.currently_held_button_press_timestamp = time()
         elif event.type == pygame.JOYAXISMOTION:
-            if self.currently_held_button is None:
-                return
             now = time()
             # sort of throttling to prevent too much tasks / calculations on short time
             if (now - self.last_timestamp) < 0.05:
                 return
-            # check if the button is held enough time (0.2s) and then execute the wheel color task loop
-            if now - self.currently_held_button_press_timestamp > 0.2 and not self.is_wheel_color_mode:
-                self.wheel_color_loop = asyncio.create_task(self.create_wheel_color_loop())
-                self.is_wheel_color_mode = True
-            if not self.is_wheel_color_mode:
-                return
-            # only if got here calculate the new value
-            _, left_y = self.my_controller.get_left_stick()
-            self.additive_y = (-1 * left_y) * 15
-            self.last_timestamp = now
+            if event.axis in (xbox360_controller.LEFT_STICK_X, xbox360_controller.LEFT_STICK_Y):
+                if self.currently_held_button is None:
+                    return
+                # check if the button is held enough time (0.2s) and then execute the wheel color task loop
+                if now - self.currently_held_button_press_timestamp > 0.2 and not self.is_wheel_color_mode:
+                    self.wheel_color_loop = asyncio.create_task(self.create_wheel_color_loop())
+                    self.is_wheel_color_mode = True
+                if not self.is_wheel_color_mode:
+                    return
+                # only if got here calculate the new value
+                _, left_y = self.my_controller.get_left_stick()
+                self.additive_y = (-1 * left_y) * 15
+                self.last_timestamp = now
+            elif event.axis in (xbox360_controller.RIGHT_STICK_X, xbox360_controller.RIGHT_STICK_Y):
+                if not self.is_brightness_loop_running:
+                    asyncio.create_task(self.create_brightness_loop())
+                    self.is_brightness_loop_running = True
+                _, right_y = self.my_controller.get_right_stick()
+                self.additive_y = (-1 * right_y) * 10
 
     async def create_wheel_color_loop(self):
         print("Starting wheel color loop")
@@ -120,8 +132,21 @@ class LightController:
                 if blue < 1:
                     blue = 1
                 self.bulb.set_state(blue=blue)
-            state = {k: bulb_state.get(k) for k in ["red", "green", "blue"]}
-            print(state)
+
+    async def create_brightness_loop(self):
+        print("Starting brightness loop")
+        executed_at = time()
+        # loop for 15 seconds
+        while time() - executed_at < 15:
+            await asyncio.sleep(0.1)
+            brightness = int(self.bulb.get_state()['brightness'] + self.additive_y)
+            if brightness > 100:
+                brightness = 100
+            if brightness < 1:
+                brightness = 1
+            self.bulb.set_state(brightness=brightness)
+        self.is_brightness_loop_running = False
+        print("Stopped running brightness loop")
 
     def connect_to_bulb(self):
         max_retries = self.max_bulb_connection_retries
