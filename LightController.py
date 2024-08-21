@@ -17,7 +17,6 @@ class LightController:
         self.wifi_pass = wifi_pass
         self.bulb = None
         self.is_bulb_connected = False
-        self.connect_to_bulb()
         self.my_controller = None
         self.last_timestamp = time()
         self.currently_held_button = None
@@ -27,6 +26,7 @@ class LightController:
         self.additive_y = 0
         self.is_brightness_loop_running = False
         self.bulb_pwr = None
+        self.connect_to_bulb()
 
     async def start(self):
         pygame.init()
@@ -86,31 +86,47 @@ class LightController:
                 self.currently_held_button = event.button
                 self.currently_held_button_press_timestamp = time()
         elif event.type == pygame.JOYAXISMOTION:
+            if not self.bulb_pwr:
+                return
             now = time()
             # sort of throttling to prevent too much tasks / calculations on short time
             if (now - self.last_timestamp) < 0.05:
                 return
             if event.axis in (xbox360_controller.LEFT_STICK_X, xbox360_controller.LEFT_STICK_Y):
-                if self.currently_held_button is None:
-                    return
-                # check if the button is held enough time (0.2s) and then execute the wheel color task loop
-                if now - self.currently_held_button_press_timestamp > 0.2 and not self.is_wheel_color_mode:
-                    self.wheel_color_loop = asyncio.create_task(self.create_wheel_color_loop())
-                    self.is_wheel_color_mode = True
-                if not self.is_wheel_color_mode:
-                    return
-                # only if got here calculate the new value
-                _, left_y = self.my_controller.get_left_stick()
-                self.additive_y = (-1 * left_y) * 15
-                self.last_timestamp = now
+                self.handle_left_joystick(now)
             elif event.axis in (xbox360_controller.RIGHT_STICK_X, xbox360_controller.RIGHT_STICK_Y):
-                if not self.bulb_pwr:
-                    return
-                if not self.is_brightness_loop_running:
-                    asyncio.create_task(self.create_brightness_loop())
-                    self.is_brightness_loop_running = True
-                _, right_y = self.my_controller.get_right_stick()
-                self.additive_y = (-1 * right_y) * 10
+                self.handle_right_joystick()
+        elif event.type == pygame.JOYHATMOTION:
+            up, right, down, left = self.my_controller.get_pad()
+            if up:
+                self.bulb.set_state(red=255, green=0, blue=255)
+            if right:
+                self.bulb.set_state(red=75, green=0, blue=130)
+            if down:
+                self.bulb.set_state(red=210, green=105, blue=30)
+            if left:
+                self.bulb.set_state(red=0, green=255, blue=255)
+
+    def handle_left_joystick(self, now):
+        if self.currently_held_button is None:
+            return
+        # check if the button is held enough time (0.2s) and then execute the wheel color task loop
+        if now - self.currently_held_button_press_timestamp > 0.2 and not self.is_wheel_color_mode:
+            self.wheel_color_loop = asyncio.create_task(self.create_wheel_color_loop())
+            self.is_wheel_color_mode = True
+        if not self.is_wheel_color_mode:
+            return
+        # only if got here calculate the new value
+        _, left_y = self.my_controller.get_left_stick()
+        self.additive_y = (-1 * left_y) * 15
+        self.last_timestamp = now
+
+    def handle_right_joystick(self):
+        if not self.is_brightness_loop_running:
+            asyncio.create_task(self.create_brightness_loop())
+            self.is_brightness_loop_running = True
+        _, right_y = self.my_controller.get_right_stick()
+        self.additive_y = (-1 * right_y) * 10
 
     async def create_wheel_color_loop(self):
         print("Starting wheel color loop")
@@ -164,6 +180,7 @@ class LightController:
             try:
                 self.bulb = initialize_connection(self.bulb_ip, self.ssid, self.wifi_pass)
                 self.is_bulb_connected = True
+                self.bulb_pwr = self.bulb.get_state()['pwr']
                 print("---------------")
                 print("Smart bulb detected, model:", self.bulb.type)
                 return None
