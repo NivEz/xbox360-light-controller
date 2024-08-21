@@ -5,6 +5,7 @@ import asyncio
 
 import xbox360_controller
 from bulb import initialize_connection
+from colors import lamp_colors
 
 
 class LightController:
@@ -26,6 +27,7 @@ class LightController:
         self.additive_y = 0
         self.is_brightness_loop_running = False
         self.bulb_pwr = None
+        self.is_colors_scene_loop_running = False
         self.connect_to_bulb()
 
     async def start(self):
@@ -81,6 +83,13 @@ class LightController:
                     bulb_state = self.bulb.get_state()
                     state = " - ".join([f"{k}: {bulb_state.get(k)}" for k in ["pwr", "red", "green", "blue", "brightness"]])
                     print(state)
+                case xbox360_controller.RIGHT_BUMP:
+                    if self.is_colors_scene_loop_running:
+                        print("Stopping colors scene loop")
+                        self.is_colors_scene_loop_running = False
+                    else:
+                        self.is_colors_scene_loop_running = True
+                        asyncio.create_task(self.colors_scene_loop())
         elif event.type == pygame.JOYBUTTONDOWN:
             if event.button in [xbox360_controller.B, xbox360_controller.A, xbox360_controller.X]:
                 self.currently_held_button = event.button
@@ -169,6 +178,15 @@ class LightController:
             self.bulb.set_state(brightness=brightness)
         self.is_brightness_loop_running = False
         print("Stopped running brightness loop")
+
+    async def colors_scene_loop(self):
+        print("Starting colors scene loop")
+        while self.is_colors_scene_loop_running:
+            for color in lamp_colors:
+                if not self.is_colors_scene_loop_running:
+                    break
+                self.bulb.set_state(red=color[0], green=color[1], blue=color[2])
+                await asyncio.sleep(2.5)
 
     def connect_to_bulb(self):
         max_retries = self.max_bulb_connection_retries
