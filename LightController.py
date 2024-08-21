@@ -26,6 +26,7 @@ class LightController:
         self.is_wheel_color_mode = False
         self.additive_y = 0
         self.is_brightness_loop_running = False
+        self.bulb_pwr = None
 
     async def start(self):
         pygame.init()
@@ -57,9 +58,12 @@ class LightController:
                     self.is_wheel_color_mode = False
                     return
             bulb_pwr = self.bulb.get_state()['pwr']
+            self.bulb_pwr = bulb_pwr
             if event.button == xbox360_controller.START:
-                self.bulb.set_state(pwr=int(not bulb_pwr))
-            if not bulb_pwr:
+                new_pwr = not bulb_pwr
+                self.bulb_pwr = new_pwr
+                self.bulb.set_state(pwr=int(new_pwr))
+            if not self.bulb_pwr:
                 return
             match event.button:
                 case xbox360_controller.BACK:
@@ -75,7 +79,7 @@ class LightController:
                     self.bulb.set_state(red=255, green=140, blue=0)
                 case xbox360_controller.LEFT_BUMP:
                     bulb_state = self.bulb.get_state()
-                    state = [f"{k}: {bulb_state.get(k)}" for k in ["red", "green", "blue", "brightness"]]
+                    state = " - ".join([f"{k}: {bulb_state.get(k)}" for k in ["pwr", "red", "green", "blue", "brightness"]])
                     print(state)
         elif event.type == pygame.JOYBUTTONDOWN:
             if event.button in [xbox360_controller.B, xbox360_controller.A, xbox360_controller.X]:
@@ -100,6 +104,8 @@ class LightController:
                 self.additive_y = (-1 * left_y) * 15
                 self.last_timestamp = now
             elif event.axis in (xbox360_controller.RIGHT_STICK_X, xbox360_controller.RIGHT_STICK_Y):
+                if not self.bulb_pwr:
+                    return
                 if not self.is_brightness_loop_running:
                     asyncio.create_task(self.create_brightness_loop())
                     self.is_brightness_loop_running = True
@@ -137,7 +143,7 @@ class LightController:
         print("Starting brightness loop")
         executed_at = time()
         # loop for 15 seconds
-        while time() - executed_at < 15:
+        while time() - executed_at < 15 and self.bulb_pwr:
             await asyncio.sleep(0.1)
             brightness = int(self.bulb.get_state()['brightness'] + self.additive_y)
             if brightness > 100:
